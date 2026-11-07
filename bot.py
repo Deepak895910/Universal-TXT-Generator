@@ -1,5 +1,6 @@
 
 import os
+import asyncio
 import logging
 
 from telegram import (
@@ -16,142 +17,177 @@ from telegram.ext import (
 
 from selectionway import get_selectionway_handlers
 
-# ---------------- CONFIGURATION ----------------
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
+# Logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-
 logger = logging.getLogger(__name__)
 
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+PORT = int(os.getenv("PORT", "10000"))
 
-# ---------------- MAIN MENU ----------------
 
-def main_menu():
+# Start command
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
     keyboard = [
         [
             InlineKeyboardButton(
-                "🎓 SelectionWay",
-                callback_data="selectionway",
+                "SelectionWay",
+                callback_data="sw_login"
             )
         ],
         [
             InlineKeyboardButton(
-                "ℹ️ Help",
-                callback_data="help",
+                "Help",
+                callback_data="help"
             )
         ],
     ]
 
-    return InlineKeyboardMarkup(keyboard)
-
-
-# ---------------- START COMMAND ----------------
-
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
     await update.message.reply_text(
-        "🚀 Welcome to Universal TXT Generator!\n\n"
-        "Select an app to continue:",
-        reply_markup=main_menu(),
+        "Welcome to Universal TXT Generator!\n\n"
+        "Select an option below:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
 
-# ---------------- BUTTON HANDLER ----------------
+# Help command
+async def help_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    await update.message.reply_text(
+        "Universal TXT Generator Help\n\n"
+        "1. /start - Open main menu\n"
+        "2. /selectionway - Start SelectionWay login\n"
+        "3. /swlogout - Logout from SelectionWay"
+    )
 
+
+# Button handler
 async def button_handler(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
+    context: ContextTypes.DEFAULT_TYPE
 ):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "selectionway":
+    if query.data == "sw_login":
         await query.message.reply_text(
-            "🎓 SelectionWay\n\n"
-            "Login karne ke liye neeche button dabayein:",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "🔐 Login with Telegram",
-                        callback_data="sw_login",
-                    )
-                ]
-            ]),
-        )
-
-    elif query.data == "sw_login":
-        await query.message.reply_text(
-            "SelectionWay login shuru karne ke liye:\n\n"
-            "/selectionway"
+            "SelectionWay login shuru karne ke liye:\n"
+            "/selectionway type karein."
         )
 
     elif query.data == "help":
         await query.message.reply_text(
-            "📖 Help\n\n"
-            "/start - Main Menu\n"
-            "/selectionway - SelectionWay Login\n"
-            "/swlogout - Logout\n"
-            "/cancel - Cancel Login"
+            "Commands:\n"
+            "/start - Main menu\n"
+            "/selectionway - Login\n"
+            "/swlogout - Logout"
         )
 
 
-# ---------------- ERROR HANDLER ----------------
+# HTTP health server for Render
+async def handle_http(reader, writer):
+    try:
+        request = await asyncio.wait_for(
+            reader.readline(),
+            timeout=5
+        )
 
-async def error_handler(
-    update: object,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    logger.error(
-        "Bot error occurred",
-        exc_info=context.error,
-    )
+        path = request.decode(
+            "utf-8", errors="ignore"
+        ).split(" ")[1] if request else "/"
+
+        if path in ("/", "/health", "/healthz"):
+            body = b"Universal TXT Generator is running"
+            status = "200 OK"
+        else:
+            body = b"Not Found"
+            status = "404 Not Found"
+
+        response = (
+            f"HTTP/1.1 {status}\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8") + body
+
+        writer.write(response)
+        await writer.drain()
+
+    except Exception:
+        logger.exception("HTTP request error")
+
+    finally:
+        writer.close()
+        await writer.wait_closed()
 
 
-# ---------------- MAIN FUNCTION ----------------
-
-def main():
+async def main():
     if not BOT_TOKEN:
         raise RuntimeError(
             "BOT_TOKEN environment variable is missing!"
         )
 
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    # Main commands
+    # Telegram commands
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", start))
+    app.add_handler(CommandHandler("help", help_command))
 
-    # Main menu buttons
+    # Menu buttons
     app.add_handler(
         CallbackQueryHandler(
             button_handler,
-            pattern=r"^(selectionway|sw_login|help)$",
+            pattern="^(sw_login|help)$"
         )
     )
 
     # SelectionWay handlers
-    for handler in get_selectionway_handlers():
+    sw_handlers = get_selectionway_handlers()
+    for handler in sw_handlers:
         app.add_handler(handler)
 
     # Error handler
+    async def error_handler(update, context):
+        logger.error(
+            "Telegram error: %s",
+            context.error
+        )
+
     app.add_error_handler(error_handler)
 
-    logger.info("Universal TXT Generator Bot Started!")
+    # Start Telegram bot
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
 
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES
+    # Start Render HTTP server
+    server = await asyncio.start_server(
+        handle_http,
+        "0.0.0.0",
+        PORT
     )
+
+    logger.info("Bot started successfully!")
+    logger.info("HTTP server running on port %s", PORT)
+
+    try:
+        async with server:
+            await asyncio.Event().wait()
+    finally:
+        await server.wait_closed()
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
