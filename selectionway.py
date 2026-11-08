@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 USERNAME, OTP = range(2)
 
 BASE_URL = "https://selectionway.com"
-LOGIN_URL = BASE_URL + "/login/?next=%2F"
+LOGIN_URL = BASE_URL + "/login"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 SESSION_DIR = DATA_DIR / "sessions"
@@ -279,34 +279,39 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["sw_username"] = username
     status_msg = await update.message.reply_text(
-        "⏳ SelectionWay वेबसाइट खोली जा रही है..."
+        "⏳ SelectionWay लॉगिन पेज लोड हो रहा है..."
     )
 
     try:
         await close_browser(user_id)
         page = await start_browser(user_id)
 
-        await page.goto(LOGIN_URL, wait_until="networkidle", timeout=45000)
-        await page.wait_for_timeout(2000)
+        # सीधे https://selectionway.com/login खोलें
+        await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
+        
+        # इनपुट दिखने तक इंतज़ार करें
+        try:
+            await page.wait_for_selector("input", state="visible", timeout=15000)
+        except Exception:
+            pass
 
+        await asyncio.sleep(2)
         await inspect_page_structure(page, stage_name="Login Page Loaded")
 
         field = await find_login_input(page)
         if not field:
-            raise RuntimeError("Login input field नहीं मिला।")
+            raise RuntimeError(f"Login input field नहीं मिला (URL: {page.url})")
 
         await field.fill(username)
-        await page.wait_for_timeout(500)
+        await asyncio.sleep(1)
 
         clicked = await click_continue(page)
         if not clicked:
-            logger.info(
-                "[Auth] Continue button not clicked directly, pressing Enter"
-            )
+            logger.info("[Auth] Pressing Enter key on input")
             await field.press("Enter")
 
-        await page.wait_for_timeout(3000)
-
+        # OTP बॉक्स दिखने तक इंतज़ार करें
+        await asyncio.sleep(3)
         await inspect_page_structure(page, stage_name="After Submit Username")
 
         await status_msg.edit_text(
@@ -379,7 +384,7 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await page.keyboard.type(otp)
 
-        await page.wait_for_timeout(1000)
+        await asyncio.sleep(1)
 
         verified = False
         for name in [
@@ -419,7 +424,7 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await page.keyboard.press("Enter")
 
-        await page.wait_for_timeout(4000)
+        await asyncio.sleep(4)
         await inspect_page_structure(page, stage_name="After OTP Verification")
 
         current_url = page.url.lower()
@@ -473,8 +478,8 @@ async def show_batches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     page = item["page"]
 
     try:
-        await page.goto(BASE_URL + "/", wait_until="networkidle", timeout=45000)
-        await page.wait_for_timeout(2000)
+        await page.goto(BASE_URL + "/", wait_until="domcontentloaded", timeout=45000)
+        await asyncio.sleep(2)
 
         links = await get_page_links(page)
         batches = []
@@ -567,8 +572,8 @@ async def export_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
             visited.add(url)
 
             try:
-                await page.goto(url, wait_until="networkidle", timeout=40000)
-                await page.wait_for_timeout(1000)
+                await page.goto(url, wait_until="domcontentloaded", timeout=40000)
+                await asyncio.sleep(1)
 
                 links = await get_page_links(page)
 
@@ -656,35 +661,4 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     context.user_data.clear()
-    await close_browser(user_id)
-    await update.message.reply_text("🚫 लॉगिन प्रक्रिया रद्द कर दी गई।")
-    return ConversationHandler.END
-
-
-def get_selectionway_handlers():
-    login_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("selectionway", selectionway_start),
-            CommandHandler("login", selectionway_start),
-        ],
-        states={
-            USERNAME: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND, receive_username
-                )
-            ],
-            OTP: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_otp)
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", cancel_login)],
-        allow_reentry=True,
-    )
-
-    return [
-        login_handler,
-        CallbackQueryHandler(export_batch, pattern=r"^sw_batch:"),
-        CommandHandler("swbatches", show_batches),
-        CommandHandler("swlogout", logout),
-    ]
-
+    await close_brows
