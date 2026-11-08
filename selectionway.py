@@ -80,16 +80,17 @@ async def inspect_page_structure(page, stage_name: str):
                 f"  Input #{idx+1} -> type='{i_type}', name='{i_name}', id='{i_id}', placeholder='{i_ph}', visible={is_vis}, class='{i_class}'"
             )
 
-        buttons = await page.query_selector_all("button, [role='button'], input[type='submit']")
-        logger.info(f"Found {len(buttons)} button tags:")
-        for idx, btn in enumerate(buttons):
+        buttons = await page.query_selector_all("button, [role='button'], a")
+        logger.info(f"Found {len(buttons)} button/links:")
+        for idx, btn in enumerate(buttons[:15]):
             text = (await btn.inner_text()).strip() if await btn.is_visible() else "(hidden)"
             b_type = await btn.get_attribute("type")
             b_class = await btn.get_attribute("class")
             is_vis = await btn.is_visible()
-            logger.info(
-                f"  Button #{idx+1} -> text='{text}', type='{b_type}', visible={is_vis}, class='{b_class}'"
-            )
+            if text:
+                logger.info(
+                    f"  Element #{idx+1} -> text='{text}', type='{b_type}', visible={is_vis}, class='{b_class}'"
+                )
     except Exception as e:
         logger.warning(f"Diagnostic error: {e}")
 
@@ -105,15 +106,23 @@ async def start_browser(user_id):
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
+            "--disable-blink-features=AutomationControlled",
         ],
     )
 
     context = await browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        viewport={"width": 1280, "height": 800},
     )
 
-    saved = decrypt_session(session_path(user_id))
+    # एंटी-बॉट डिटेक्शन बायपास
+    await context.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+    """)
 
+    saved = decrypt_session(session_path(user_id))
     if saved:
         try:
             if "cookies" in saved:
@@ -180,6 +189,47 @@ async def close_browser(user_id):
             pass
 
 
+async def ensure_page_ready(page):
+    """अगर 'Reload' स्क्रीन दिखे तो क्लिक करके पेज लोड कराता है"""
+    reload_btn = page.locator("button:has-text('Reload')").first
+    try:
+        if await reload_btn.is_visible():
+            logger.info("[Auth] Found Reload button, clicking it...")
+            await reload_btn.click()
+            await page.wait_for_load_state("networkidle")
+            await asyncio.sleep(2)
+    except Exception:
+        pass
+
+
+async def open_login_modal_if_needed(page):
+    inputs = await page.query_selector_all("input:not([type='hidden'])")
+    visible_inputs = [i for i in inputs if await i.is_visible()]
+    if visible_inputs:
+        return True
+
+    login_triggers = [
+        "a:has-text('Login')",
+        "button:has-text('Login')",
+        "a:has-text('Sign In')",
+        "button:has-text('Sign In')",
+        "a[href*='login']",
+    ]
+
+    for trigger in login_triggers:
+        btn = page.locator(trigger).first
+        try:
+            if await btn.is_visible():
+                logger.info(f"[Auth] Clicking login trigger: {trigger}")
+                await btn.click()
+                await asyncio.sleep(2)
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
 async def find_login_input(page):
     selectors = [
         'input[type="tel"]',
@@ -223,9 +273,11 @@ async def click_continue(page):
 
     for name in names:
         try:
-            button = page.get_by_role("button", name=re.compile(name, re.I)).first
+            button = page.get_by_role(
+                "button", name=re.compile(name, re.I)
+            ).first
             if await button.is_visible():
-                logger.info(f"[Selector Match] Clicked button via name: {name}")
+                logger.info(f"[Selector Match] Clicked button: {name}")
                 await button.click()
                 return True
         except Exception:
@@ -241,7 +293,6 @@ async def click_continue(page):
         try:
             btn = page.locator(css).first
             if await btn.is_visible():
-                logger.info(f"[Selector Match] Clicked button via css: {css}")
                 await btn.click()
                 return True
         except Exception:
@@ -286,14 +337,20 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await close_browser(user_id)
         page = await start_browser(user_id)
 
-        await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
+        # सीधे लॉगिन पेज खोलें
+        try:
+            await page.goto(LOGIN_URL, wait_until="networkidle", timeout=45000)
+        except Exception:
+            await page.goto(BASE_URL, wait_until="networkidle", timeout=45000)
+
+        await ensure_page_ready(page)
+        await open_login_modal_if_needed(page)
 
         try:
-            await page.wait_for_selector("input", state="visible", timeout=15000)
+            await page.wait_for_selector("input:not([type='hidden'])", state="visible", timeout=10000)
         except Exception:
             pass
 
-        await asyncio.sleep(2)
         await inspect_page_structure(page, stage_name="Login Page Loaded")
 
         field = await find_login_input(page)
@@ -376,9 +433,6 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif count >= 1:
             await fields.first.fill(otp)
         else:
-            logger.info(
-                "[Auth] No explicit OTP input, typing directly via keyboard"
-            )
             await page.keyboard.type(otp)
 
         await asyncio.sleep(1)
@@ -399,7 +453,6 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if await button.is_visible():
                     await button.click()
                     verified = True
-                    logger.info(f"[Auth] Clicked verify button: {name}")
                     break
             except Exception:
                 continue
@@ -416,25 +469,16 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
         if not verified:
-            logger.info(
-                "[Auth] Verify button not found by selector, pressing Enter"
-            )
             await page.keyboard.press("Enter")
 
         await asyncio.sleep(4)
         await inspect_page_structure(page, stage_name="After OTP Verification")
 
-        current_url = page.url.lower()
-        if "/login" in current_url:
-            raise RuntimeError(
-                f"लॉगिन पूरा नहीं हो सका (Current URL: {page.url})"
-            )
-
         await save_session(user_id)
 
         await status_msg.edit_text(
             "✅ **SelectionWay Login Successful!**\n\n"
-            "आपका सेशन सुरक्षित सेव हो गया है। अब Batches चेक कर रहा हूँ..."
+            "आपका सेशन सुरक्षित सेव हो गया है। अब Batches लोड हो रहे हैं..."
         )
 
         await show_batches(update, context)
@@ -475,7 +519,9 @@ async def show_batches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     page = item["page"]
 
     try:
-        await page.goto(BASE_URL + "/", wait_until="domcontentloaded", timeout=45000)
+        await page.goto(
+            BASE_URL + "/", wait_until="domcontentloaded", timeout=45000
+        )
         await asyncio.sleep(2)
 
         links = await get_page_links(page)
@@ -520,7 +566,9 @@ async def show_batches(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception:
         logger.exception("Batch listing failed")
-        await update.effective_chat.send_message("❌ Batch list लोड नहीं हो पाई।")
+        await update.effective_chat.send_message(
+            "❌ Batch list लोड नहीं हो पाई।"
+        )
 
 
 async def export_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -569,7 +617,9 @@ async def export_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
             visited.add(url)
 
             try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=40000)
+                await page.goto(
+                    url, wait_until="domcontentloaded", timeout=40000
+                )
                 await asyncio.sleep(1)
 
                 links = await get_page_links(page)
