@@ -663,4 +663,27 @@ async def cancel_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-def get_selectionw
+def get_selectionway_handlers():
+    login_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("selectionway", selectionway_start),
+            CommandHandler("login", selectionway_start),
+        ],
+        states={
+            USERNAME: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_username
+                )
+            ],
+            OTP: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_otp)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_login)],
+        allow_reentry=True,
+    )
+
+    return [
+        login_handler,
+        CallbackQueryHandler(export_batch, pattern=r"^sw_batch:"),
+        CommandHandler("swbatches", show_batches),
+        CommandHandler("swlogout", logout),
+    ]
