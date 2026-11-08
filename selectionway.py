@@ -286,10 +286,8 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await close_browser(user_id)
         page = await start_browser(user_id)
 
-        # सीधे https://selectionway.com/login खोलें
         await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
-        
-        # इनपुट दिखने तक इंतज़ार करें
+
         try:
             await page.wait_for_selector("input", state="visible", timeout=15000)
         except Exception:
@@ -310,7 +308,6 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info("[Auth] Pressing Enter key on input")
             await field.press("Enter")
 
-        # OTP बॉक्स दिखने तक इंतज़ार करें
         await asyncio.sleep(3)
         await inspect_page_structure(page, stage_name="After Submit Username")
 
@@ -661,4 +658,9 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     context.user_data.clear()
-    await close_brows
+    await close_browser(user_id)
+    await update.message.reply_text("🚫 लॉगिन प्रक्रिया रद्द कर दी गई।")
+    return ConversationHandler.END
+
+
+def get_selectionw
