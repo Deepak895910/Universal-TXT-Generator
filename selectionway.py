@@ -63,7 +63,6 @@ def session_path(user_id):
 
 
 async def inspect_page_structure(page, stage_name: str):
-    """लॉगिन और OTP पेज के सभी HTML फ़ील्ड्स और बटन्स Render Logs में प्रिंट करता है"""
     logger.info(f"====== [DIAGNOSTIC: {stage_name}] ======")
     logger.info(f"Page URL: {page.url}")
 
@@ -105,8 +104,8 @@ async def start_browser(user_id):
             "--no-sandbox",
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
-            "--disable-gpu"
-        ]
+            "--disable-gpu",
+        ],
     )
 
     context = await browser.new_context(
@@ -128,7 +127,7 @@ async def start_browser(user_id):
                             localStorage.setItem(key, value);
                         }
                     }""",
-                    values
+                    values,
                 )
                 await p.close()
             logger.info(f"[Auth] Restored session storage for {user_id}")
@@ -194,7 +193,7 @@ async def find_login_input(page):
         'input[placeholder*="email" i]',
         'input[placeholder*="नंबर" i]',
         'input[type="text"]',
-        'input:not([type="hidden"])'
+        'input:not([type="hidden"])',
     ]
 
     for selector in selectors:
@@ -211,8 +210,15 @@ async def find_login_input(page):
 
 async def click_continue(page):
     names = [
-        "Continue", "Next", "Login", "Continue with OTP",
-        "Send OTP", "Get OTP", "Proceed", "आगे बढ़ें", "ओटीपी"
+        "Continue",
+        "Next",
+        "Login",
+        "Continue with OTP",
+        "Send OTP",
+        "Get OTP",
+        "Proceed",
+        "आगे बढ़ें",
+        "ओटीपी",
     ]
 
     for name in names:
@@ -229,7 +235,7 @@ async def click_continue(page):
         "button[type='submit']",
         "form button",
         "button:has-text('OTP')",
-        "button:has-text('Continue')"
+        "button:has-text('Continue')",
     ]
     for css in css_buttons:
         try:
@@ -272,7 +278,9 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return USERNAME
 
     context.user_data["sw_username"] = username
-    status_msg = await update.message.reply_text("⏳ SelectionWay वेबसाइट खोली जा रही है...")
+    status_msg = await update.message.reply_text(
+        "⏳ SelectionWay वेबसाइट खोली जा रही है..."
+    )
 
     try:
         await close_browser(user_id)
@@ -292,7 +300,9 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         clicked = await click_continue(page)
         if not clicked:
-            logger.info("[Auth] Continue button not clicked directly, pressing Enter")
+            logger.info(
+                "[Auth] Continue button not clicked directly, pressing Enter"
+            )
             await field.press("Enter")
 
         await page.wait_for_timeout(3000)
@@ -326,7 +336,9 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not re.fullmatch(r"\d{4,6}", otp):
-        await update.effective_chat.send_message("कृपया 4 या 6 अंकों का संख्यात्मक OTP भेजें।")
+        await update.effective_chat.send_message(
+            "कृपया 4 या 6 अंकों का संख्यात्मक OTP भेजें।"
+        )
         return OTP
 
     item = BROWSERS.get(user_id)
@@ -337,7 +349,9 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     page = item["page"]
-    status_msg = await update.effective_chat.send_message("⏳ OTP सत्यापित किया जा रहा है...")
+    status_msg = await update.effective_chat.send_message(
+        "⏳ OTP सत्यापित किया जा रहा है..."
+    )
 
     try:
         await inspect_page_structure(page, stage_name="Before OTP Fill")
@@ -360,15 +374,26 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif count >= 1:
             await fields.first.fill(otp)
         else:
-            logger.info("[Auth] No explicit OTP input, typing directly via keyboard")
+            logger.info(
+                "[Auth] No explicit OTP input, typing directly via keyboard"
+            )
             await page.keyboard.type(otp)
 
         await page.wait_for_timeout(1000)
 
         verified = False
-        for name in ["Verify OTP", "Verify", "Submit", "Login", "Confirm", "आगे बढ़ें"]:
+        for name in [
+            "Verify OTP",
+            "Verify",
+            "Submit",
+            "Login",
+            "Confirm",
+            "आगे बढ़ें",
+        ]:
             try:
-                button = page.get_by_role("button", name=re.compile(name, re.I)).first
+                button = page.get_by_role(
+                    "button", name=re.compile(name, re.I)
+                ).first
                 if await button.is_visible():
                     await button.click()
                     verified = True
@@ -379,7 +404,9 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not verified:
             try:
-                submit_btn = page.locator("button[type='submit'], button.btn-primary").first
+                submit_btn = page.locator(
+                    "button[type='submit'], button.btn-primary"
+                ).first
                 if await submit_btn.is_visible():
                     await submit_btn.click()
                     verified = True
@@ -387,7 +414,9 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
         if not verified:
-            logger.info("[Auth] Verify button not found by selector, pressing Enter")
+            logger.info(
+                "[Auth] Verify button not found by selector, pressing Enter"
+            )
             await page.keyboard.press("Enter")
 
         await page.wait_for_timeout(4000)
@@ -395,7 +424,9 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         current_url = page.url.lower()
         if "/login" in current_url:
-            raise RuntimeError(f"लॉगिन पूरा नहीं हो सका (Current URL: {page.url})")
+            raise RuntimeError(
+                f"लॉगिन पूरा नहीं हो सका (Current URL: {page.url})"
+            )
 
         await save_session(user_id)
 
@@ -409,9 +440,7 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.exception("OTP verification failed")
-        await status_msg.edit_text(
-            f"❌ OTP सत्यापन में समस्या आई:\n`{str(e)}`"
-        )
+        await status_msg.edit_text(f"❌ OTP सत्यापन में समस्या आई:\n`{str(e)}`")
         await close_browser(user_id)
         return ConversationHandler.END
 
@@ -436,7 +465,9 @@ async def show_batches(update: Update, context: ContextTypes.DEFAULT_TYPE):
             item = BROWSERS.get(user_id)
 
     if not item:
-        await update.effective_chat.send_message("कृपया पहले /selectionway से लॉगिन करें।")
+        await update.effective_chat.send_message(
+            "कृपया पहले /selectionway से लॉगिन करें।"
+        )
         return
 
     page = item["page"]
@@ -472,16 +503,17 @@ async def show_batches(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = []
         for i, batch in enumerate(batches[:30]):
-            keyboard.append([
-                InlineKeyboardButton(
-                    batch["name"][:50],
-                    callback_data=f"sw_batch:{i}"
-                )
-            ])
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        batch["name"][:50], callback_data=f"sw_batch:{i}"
+                    )
+                ]
+            )
 
         await update.effective_chat.send_message(
             "📚 **उपलब्ध Batches:**\nजिस बैच का TXT डेटा निकालना है, उसे चुनें:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
     except Exception:
@@ -503,7 +535,9 @@ async def export_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
             item = BROWSERS.get(user_id)
 
     if not item:
-        await query.message.reply_text("Session expire हो गया है। कृपया दोबारा /selectionway से लॉगिन करें।")
+        await query.message.reply_text(
+            "Session expire हो गया है। कृपया दोबारा /selectionway से लॉगिन करें।"
+        )
         return
 
     try:
@@ -576,11 +610,13 @@ async def export_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for subject in subjects:
             lines.append(subject)
 
-        lines.extend([
-            "",
-            "LECTURES",
-            "-" * 30,
-        ])
+        lines.extend(
+            [
+                "",
+                "LECTURES",
+                "-" * 30,
+            ]
+        )
 
         for number, lecture in enumerate(lectures, 1):
             lines.append(f"{number}. {lecture['title']}")
@@ -595,7 +631,7 @@ async def export_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_document(
             document=output,
             filename=f"{batch['name']}.txt",
-            caption=f"✅ **{batch['name']}**\nकुल लेक्चर्स लिंक मिले: {len(lectures)}"
+            caption=f"✅ **{batch['name']}**\nकुल लेक्चर्स लिंक मिले: {len(lectures)}",
         )
 
     except Exception:
@@ -626,14 +662,4 @@ async def cancel_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def get_selectionway_handlers():
-    login = ConversationHandler(
-        entry_points=[
-            CommandHandler("selectionway", selectionway_start),
-            CommandHandler("login", selectionway_start)
-        ],
-        states={
-            USERNAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_username)
-            ],
-            OTP: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND,
+    login = Conv
