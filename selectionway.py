@@ -50,7 +50,6 @@ def encrypt_session(data):
 def decrypt_session(path):
     if not KEY or not path.exists():
         return None
-
     try:
         encrypted = path.read_bytes()
         return json.loads(Fernet(KEY.encode()).decrypt(encrypted))
@@ -64,10 +63,7 @@ def session_path(user_id):
 
 
 async def inspect_page_structure(page, stage_name: str):
-    """
-    वेबसाइट के लॉगिन/OTP पेज पर मौजूद सभी इनपुट्स और बटन्स को
-    Render Logs में साफ़-साफ़ प्रिंट करता है।
-    """
+    """लॉगिन और OTP पेज के सभी HTML फ़ील्ड्स और बटन्स Render Logs में प्रिंट करता है"""
     logger.info(f"====== [DIAGNOSTIC: {stage_name}] ======")
     logger.info(f"Page URL: {page.url}")
 
@@ -96,7 +92,7 @@ async def inspect_page_structure(page, stage_name: str):
                 f"  Button #{idx+1} -> text='{text}', type='{b_type}', visible={is_vis}, class='{b_class}'"
             )
     except Exception as e:
-        logger.warning(f"Could not complete diagnostic dump: {e}")
+        logger.warning(f"Diagnostic error: {e}")
 
     logger.info(f"====== [END DIAGNOSTIC: {stage_name}] ======\n")
 
@@ -161,7 +157,7 @@ async def save_session(user_id):
         encrypted = encrypt_session(state)
         if encrypted:
             session_path(user_id).write_bytes(encrypted)
-            logger.info(f"[Auth] Successfully saved encrypted session for user {user_id}")
+            logger.info(f"[Auth] Saved session for user {user_id}")
 
         USER_SESSIONS[user_id] = True
     except Exception:
@@ -205,7 +201,7 @@ async def find_login_input(page):
         try:
             locator = page.locator(selector).first
             if await locator.is_visible():
-                logger.info(f"[Selector Match] Found username input via: {selector}")
+                logger.info(f"[Selector Match] Found username input: {selector}")
                 return locator
         except Exception:
             continue
@@ -223,13 +219,12 @@ async def click_continue(page):
         try:
             button = page.get_by_role("button", name=re.compile(name, re.I)).first
             if await button.is_visible():
-                logger.info(f"[Selector Match] Found continue button via role: '{name}'")
+                logger.info(f"[Selector Match] Clicked button via name: {name}")
                 await button.click()
                 return True
         except Exception:
             continue
 
-    # Fallback to CSS button selectors
     css_buttons = [
         "button[type='submit']",
         "form button",
@@ -240,7 +235,7 @@ async def click_continue(page):
         try:
             btn = page.locator(css).first
             if await btn.is_visible():
-                logger.info(f"[Selector Match] Found button via css: {css}")
+                logger.info(f"[Selector Match] Clicked button via css: {css}")
                 await btn.click()
                 return True
         except Exception:
@@ -256,8 +251,8 @@ async def selectionway_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if saved:
         await update.message.reply_text(
             "🎓 SelectionWay\n\n"
-            "✅ आपका लॉगिन सेशन पहले से सेव है!\n"
-            "सीधे बैच देखने के लिए /swbatches टाइप करें, या नया लॉगिन करने के लिए अपना Phone/Email भेजें:"
+            "✅ आपका लॉगिन सेशन पहले से सुरक्षित सेव है!\n"
+            "बैच देखने के लिए /swbatches टाइप करें, या नया लॉगिन करने के लिए अपना Phone/Email भेजें:"
         )
     else:
         await update.message.reply_text(
@@ -286,7 +281,6 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await page.goto(LOGIN_URL, wait_until="networkidle", timeout=45000)
         await page.wait_for_timeout(2000)
 
-        # डायग्नोस्टिक लॉग
         await inspect_page_structure(page, stage_name="Login Page Loaded")
 
         field = await find_login_input(page)
@@ -298,18 +292,16 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         clicked = await click_continue(page)
         if not clicked:
-            # Fallback: Enter key
-            logger.info("[Auth] Continue button not clicked directly, pressing Enter key")
+            logger.info("[Auth] Continue button not clicked directly, pressing Enter")
             await field.press("Enter")
 
         await page.wait_for_timeout(3000)
 
-        # डायग्नोस्टिक लॉग OTP स्क्रीन के लिए
         await inspect_page_structure(page, stage_name="After Submit Username")
 
         await status_msg.edit_text(
             f"📩 `{username}` पर OTP भेजा गया है!\n\n"
-            "कृपया प्राप्त हुआ 4 या 6-अंकों का OTP यहाँ टाइप करके भेजें:\n"
+            "कृपया प्राप्त OTP यहाँ भेजें:\n"
             "(रद्द करने के लिए /cancel)"
         )
         return OTP
@@ -319,7 +311,7 @@ async def receive_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await close_browser(user_id)
         await status_msg.edit_text(
             f"❌ लॉगिन शुरू करने में समस्या आई:\n`{str(e)}`\n\n"
-            "कृपया Render Logs चेक करें या दोबारा प्रयास करें।"
+            "कृपया दोबारा प्रयास करें।"
         )
         return ConversationHandler.END
 
@@ -334,7 +326,7 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not re.fullmatch(r"\d{4,6}", otp):
-        await update.effective_chat.send_message("कृपया केवल 4 या 6 अंकों का संख्यात्मक OTP भेजें।")
+        await update.effective_chat.send_message("कृपया 4 या 6 अंकों का संख्यात्मक OTP भेजें।")
         return OTP
 
     item = BROWSERS.get(user_id)
@@ -373,7 +365,6 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await page.wait_for_timeout(1000)
 
-        # Verify / Submit बटन क्लिक करें
         verified = False
         for name in ["Verify OTP", "Verify", "Submit", "Login", "Confirm", "आगे बढ़ें"]:
             try:
@@ -410,7 +401,7 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await status_msg.edit_text(
             "✅ **SelectionWay Login Successful!**\n\n"
-            "आपका सेशन सुरक्षित सेव हो गया है। अब उपलब्ध Batches चेक कर रहा हूँ..."
+            "आपका सेशन सुरक्षित सेव हो गया है। अब Batches चेक कर रहा हूँ..."
         )
 
         await show_batches(update, context)
@@ -419,8 +410,7 @@ async def receive_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.exception("OTP verification failed")
         await status_msg.edit_text(
-            f"❌ OTP सत्यापन में समस्या आई:\n`{str(e)}`\n\n"
-            "कृपया Render Logs की जानकारी चेक करें।"
+            f"❌ OTP सत्यापन में समस्या आई:\n`{str(e)}`"
         )
         await close_browser(user_id)
         return ConversationHandler.END
@@ -439,7 +429,6 @@ async def show_batches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     item = BROWSERS.get(user_id)
 
-    # अगर ब्राउज़र मेमोरी में नहीं है, लेकिन सहेजा गया सेशन मौजूद है
     if not item:
         saved = decrypt_session(session_path(user_id))
         if saved:
@@ -528,7 +517,7 @@ async def export_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         page = item["page"]
 
         await query.edit_message_text(
-            f"⏳ **{batch['name']}** का डेटा निकाला जा रहा है...\nइसमें 1-2 मिनट लग सकते हैं।"
+            f"⏳ **{batch['name']}** का डेटा निकाला जा रहा है...\nकृपया प्रतीक्षा करें।"
         )
 
         queue = [(batch["url"], 0)]
@@ -611,7 +600,7 @@ async def export_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception:
         logger.exception("Batch export failed")
-        await query.message.reply_text("❌ Export में समस्या आई। कृपया Render logs चेक करें।")
+        await query.message.reply_text("❌ Export में समस्या आई।")
 
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -632,193 +621,19 @@ async def cancel_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     context.user_data.clear()
     await close_browser(user_id)
-    await update.message.reply_text("🚫 लॉगिन प्ing failed")
-        await update.effective_chat.send_message(
-            "Batch list load nahi hui."
-        )
-
-
-async def export_batch(update, context):
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.from_user.id
-    item = BROWSERS.get(user_id)
-
-    if not item:
-        await query.message.reply_text(
-            "Session expired. Dobara login karein."
-        )
-        return
-
-    try:
-        index = int(query.data.split(":")[1])
-        batches = context.user_data.get("sw_batches", [])
-
-        if index >= len(batches):
-            raise ValueError("Invalid batch")
-
-        batch = batches[index]
-        page = item["page"]
-
-        await query.edit_message_text(
-            "⏳ Batch ke lecture links collect ho rahe hain..."
-        )
-
-        queue = [(batch["url"], 0)]
-        visited = set()
-        lectures = []
-        subjects = []
-
-        while queue and len(visited) < 100:
-            url, depth = queue.pop(0)
-
-            if url in visited:
-                continue
-
-            visited.add(url)
-
-            try:
-                await page.goto(
-                    url,
-                    wait_until="domcontentloaded",
-                    timeout=45000
-                )
-                await page.wait_for_timeout(1200)
-
-                links = await get_page_links(page)
-
-                for link in links:
-                    href = urljoin(BASE_URL, link["href"])
-                    text = link["text"].strip()
-
-                    if not text:
-                        continue
-
-                    if "/batches/class/" in href:
-                        if href not in [x["url"] for x in lectures]:
-                            lectures.append({
-                                "title": text,
-                                "url": href
-                            })
-
-                    elif (
-                        depth < 2
-                        and urlparse(href).netloc == urlparse(BASE_URL).netloc
-                        and "/batches/" in urlparse(href).path
-                        and href not in visited
-                        and href != batch["url"]
-                    ):
-                        if href not in [x[0] for x in queue]:
-                            queue.append((href, depth + 1))
-                            subjects.append(text)
-
-            except Exception:
-                logger.exception("Page scan failed: %s", url)
-
-        lines = [
-            "UNIVERSAL TXT GENERATOR",
-            "=" * 45,
-            f"Batch: {batch['name']}",
-            f"Batch URL: {batch['url']}",
-            "",
-            "SUBJECTS / SECTIONS",
-            "-" * 30,
-        ]
-
-        for subject in subjects:
-            lines.append(subject)
-
-        lines.extend([
-            "",
-            "LECTURES",
-            "-" * 30,
-        ])
-
-        for number, lecture in enumerate(lectures, 1):
-            lines.append(f"{number}. {lecture['title']}")
-            lines.append(lecture["url"])
-            lines.append("")
-
-        lines.append(f"Total Lectures: {len(lectures)}")
-
-        output = BytesIO("\n".join(lines).encode("utf-8"))
-        output.name = "selectionway_batch.txt"
-
-        await query.message.reply_document(
-            document=output,
-            filename="selectionway_batch.txt",
-            caption=(
-                f"Batch: {batch['name']}\n"
-                f"Lecture links found: {len(lectures)}"
-            )
-        )
-
-    except Exception:
-        logger.exception("Batch export failed")
-        await query.message.reply_text(
-            "Export mein problem aayi. Render logs check karein."
-        )
-
-
-async def logout(update, context):
-    user_id = update.effective_user.id
-
-    USER_SESSIONS.pop(user_id, None)
-    context.user_data.clear()
-
-    try:
-        session_path(user_id).unlink(missing_ok=True)
-    except Exception:
-        pass
-
-    await close_browser(user_id)
-
-    await update.message.reply_text(
-        "SelectionWay session logout ho gaya."
-    )
-
-
-async def cancel_login(update, context):
-    user_id = update.effective_user.id
-
-    context.user_data.clear()
-    await close_browser(user_id)
-
-    await update.message.reply_text("Login cancelled.")
+    await update.message.reply_text("🚫 लॉगिन प्रक्रिया रद्द कर दी गई।")
     return ConversationHandler.END
 
 
 def get_selectionway_handlers():
     login = ConversationHandler(
         entry_points=[
-            CommandHandler("selectionway", selectionway_start)
+            CommandHandler("selectionway", selectionway_start),
+            CommandHandler("login", selectionway_start)
         ],
         states={
             USERNAME: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    receive_username
-                )
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_username)
             ],
             OTP: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    receive_otp
-                )
-            ],
-        },
-        fallbacks=[
-            CommandHandler("cancel", cancel_login)
-        ],
-        allow_reentry=True,
-    )
-
-    return [
-        login,
-        CallbackQueryHandler(
-            export_batch,
-            pattern=r"^sw_batch:"
-        ),
-        CommandHandler("swlogout", logout),
-    ]
+                MessageHandler(filters.TEXT & ~filters.COMMAND,
